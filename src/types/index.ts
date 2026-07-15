@@ -17,7 +17,11 @@ export interface Settings {
   // animate-with-text-v3 options
   action: string;
   frameCount: number;
+  /** Where the first_frame comes from: the active cel, or a layer group's composite. */
+  inputSource: 'cel' | 'group';
   inputFrame: number;
+  /** Layer group id used when inputSource === 'group' (empty → first group). */
+  inputGroup: string;
   /** -1 none · -2 loop (= input frame) · >=0 a specific frame index. */
   lastFrame: number;
   enhance: boolean;

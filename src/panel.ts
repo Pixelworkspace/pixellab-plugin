@@ -77,7 +77,9 @@ async function route(action: string, value: any): Promise<void> {
     case Action.BaseUrl: px.storage.set('baseUrl', value || BASE_DEFAULT); return;
     case Action.AnimAction: px.storage.set('action', value); return;
     case Action.FrameCount: px.storage.set('frameCount', Number(value)); return;
+    case Action.InputSource: px.storage.set('inputSource', value === 'group' ? 'group' : 'cel'); return;
     case Action.InputFrame: px.storage.set('inputFrame', Number(value)); return;
+    case Action.InputGroup: px.storage.set('inputGroup', value); return;
     case Action.LastFrame: px.storage.set('lastFrame', Number(value)); return;
     case Action.Enhance: px.storage.set('enhance', value); return;
     case Action.Seed: px.storage.set('seed', value); return;

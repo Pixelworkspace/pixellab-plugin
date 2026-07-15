@@ -31,7 +31,9 @@
       repaintDesc: px.storage.get("repaintDesc") || "",
       action: px.storage.get("action") || "",
       frameCount: px.storage.get("frameCount") || 8,
+      inputSource: px.storage.get("inputSource") === "group" ? "group" : "cel",
       inputFrame: px.storage.get("inputFrame") || 0,
+      inputGroup: px.storage.get("inputGroup") || "",
       lastFrame: px.storage.get("lastFrame") == null ? -1 : px.storage.get("lastFrame"),
       enhance: px.storage.get("enhance") === true,
       seed: px.storage.get("seed") || ""
@@ -182,7 +184,9 @@
     BaseUrl: "baseUrl",
     AnimAction: "animAction",
     FrameCount: "frameCount",
+    InputSource: "inputSource",
     InputFrame: "inputFrame",
+    InputGroup: "inputGroup",
     LastFrame: "lastFrame",
     Enhance: "enhance",
     Seed: "seed",
@@ -334,6 +338,13 @@
     px.editor.setFrame(index);
     return px.image.encode(px.editor.pixels(), w, h);
   }
+  async function encodeGroup(groupId, w, h) {
+    return px.image.encode(px.editor.groupPixels(groupId), w, h);
+  }
+  function resolveGroupId(groups, saved) {
+    if (!groups.length) throw new Error("This document has no layer groups.");
+    return saved && groups.some((g) => g.id === saved) ? saved : groups[0].id;
+  }
   function toStrip(frames) {
     const fw = frames[0].width;
     const fh = frames[0].height;
@@ -352,8 +363,14 @@
     const w = px.editor.width();
     const h = px.editor.height();
     const fcount = px.editor.frameCount();
-    const inputIdx = Math.min(s.inputFrame || 0, fcount - 1);
-    const firstFrame = await encodeFrame(inputIdx, w, h);
+    let firstFrame;
+    if (s.inputSource === "group") {
+      const gid = resolveGroupId(px.editor.groups(), s.inputGroup);
+      firstFrame = await encodeGroup(gid, w, h);
+    } else {
+      const inputIdx = Math.min(s.inputFrame || 0, fcount - 1);
+      firstFrame = await encodeFrame(inputIdx, w, h);
+    }
     const req = {
       first_frame: { type: "base64", base64: firstFrame },
       action: s.action,
@@ -426,6 +443,10 @@
     const fc = px.editor.frameCount();
     const kids = [];
     if (!s.apiKey) kids.push(...needsKeyBanner());
+    const isGroup = s.inputSource === "group";
+    const groups = px.editor.groups();
+    const groupOpts = groups.map((g) => ({ label: g.name + " (" + g.layers.length + " layer" + (g.layers.length === 1 ? "" : "s") + ")", value: g.id }));
+    const groupVal = s.inputGroup && groups.some((g) => g.id === s.inputGroup) ? s.inputGroup : groups[0]?.id ?? "";
     const frameOpts = Array.from({ length: fc }, (_, i) => ({ label: "Frame " + (i + 1), value: i }));
     const lastOpts = [
       { label: "\u2014 none \u2014", value: -1 },
@@ -436,11 +457,27 @@
       { type: WidgetType.Text, text: "Animate the current sprite \u2192 timeline frames. Endpoint: animate-with-text-v3." },
       { type: WidgetType.TextArea, label: "Action", value: s.action, rows: 2, action: Action.AnimAction, placeholder: "walking \xB7 attacking \xB7 idle sway (keep it short)" },
       {
+        type: WidgetType.Select,
+        label: "Input",
+        value: s.inputSource,
+        action: Action.InputSource,
+        options: [
+          { label: "Active cel", value: "cel" },
+          { label: "Layer group (composited)", value: "group" }
+        ]
+      },
+      {
         type: WidgetType.HStack,
         gap: 8,
         children: [
           { type: WidgetType.Select, label: "Frames", value: s.frameCount, action: Action.FrameCount, options: FRAME_COUNTS.map((n) => ({ label: "" + n, value: n })) },
-          { type: WidgetType.Select, label: "Input frame", value: Math.min(s.inputFrame, Math.max(0, fc - 1)), action: Action.InputFrame, options: frameOpts }
+          isGroup ? {
+            type: WidgetType.Select,
+            label: "Layer group",
+            value: groupVal,
+            action: Action.InputGroup,
+            options: groupOpts.length ? groupOpts : [{ label: "\u2014 no groups \u2014", value: "" }]
+          } : { type: WidgetType.Select, label: "Input frame", value: Math.min(s.inputFrame, Math.max(0, fc - 1)), action: Action.InputFrame, options: frameOpts }
         ]
       },
       { type: WidgetType.Select, label: "Last frame (optional \u2014 for seamless loops)", value: s.lastFrame, action: Action.LastFrame, options: lastOpts },
@@ -741,8 +778,14 @@
       case Action.FrameCount:
         px.storage.set("frameCount", Number(value));
         return;
+      case Action.InputSource:
+        px.storage.set("inputSource", value === "group" ? "group" : "cel");
+        return;
       case Action.InputFrame:
         px.storage.set("inputFrame", Number(value));
+        return;
+      case Action.InputGroup:
+        px.storage.set("inputGroup", value);
         return;
       case Action.LastFrame:
         px.storage.set("lastFrame", Number(value));

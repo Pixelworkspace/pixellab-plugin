@@ -17,6 +17,20 @@ async function encodeFrame(index: number, w: number, h: number): Promise<string>
   return px.image.encode(px.editor.pixels(), w, h);
 }
 
+/** Encode a layer group's composited result as a PNG data-URL. */
+async function encodeGroup(groupId: string, w: number, h: number): Promise<string> {
+  return px.image.encode(px.editor.groupPixels(groupId), w, h);
+}
+
+/**
+ * Resolve the group id to use: the saved one if it still exists, else the first
+ * group. Throws when the document has no groups. `groups` is the current list.
+ */
+function resolveGroupId(groups: LayerGroupInfo[], saved: string): string {
+  if (!groups.length) throw new Error('This document has no layer groups.');
+  return saved && groups.some((g) => g.id === saved) ? saved : groups[0].id;
+}
+
 /** Pack N equal-size frames side by side into one horizontal strip buffer. */
 function toStrip(frames: DecodedImage[]): { pixels: Uint32Array; width: number; height: number } {
   const fw = frames[0].width;
@@ -45,8 +59,16 @@ export async function animate(): Promise<AnimateResult> {
   const h = px.editor.height();
   const fcount = px.editor.frameCount();
 
-  const inputIdx = Math.min(s.inputFrame || 0, fcount - 1);
-  const firstFrame = await encodeFrame(inputIdx, w, h);
+  // The first_frame image comes from either the active cel of a chosen timeline
+  // frame, or the composited result of a whole layer group.
+  let firstFrame: string;
+  if (s.inputSource === 'group') {
+    const gid = resolveGroupId(px.editor.groups(), s.inputGroup);
+    firstFrame = await encodeGroup(gid, w, h);
+  } else {
+    const inputIdx = Math.min(s.inputFrame || 0, fcount - 1);
+    firstFrame = await encodeFrame(inputIdx, w, h);
+  }
 
   const req: Record<string, unknown> = {
     first_frame: { type: 'base64', base64: firstFrame },
@@ -133,6 +155,11 @@ export function animateTab(): Widget[] {
   const kids: Widget[] = [];
   if (!s.apiKey) kids.push(...needsKeyBanner());
 
+  const isGroup = s.inputSource === 'group';
+  const groups = px.editor.groups();
+  const groupOpts = groups.map((g) => ({ label: g.name + ' (' + g.layers.length + ' layer' + (g.layers.length === 1 ? '' : 's') + ')', value: g.id }));
+  const groupVal = s.inputGroup && groups.some((g) => g.id === s.inputGroup) ? s.inputGroup : groups[0]?.id ?? '';
+
   const frameOpts = Array.from({ length: fc }, (_, i) => ({ label: 'Frame ' + (i + 1), value: i }));
   const lastOpts = [
     { label: '— none —', value: -1 },
@@ -144,11 +171,29 @@ export function animateTab(): Widget[] {
     { type: WidgetType.Text, text: 'Animate the current sprite → timeline frames. Endpoint: animate-with-text-v3.' },
     { type: WidgetType.TextArea, label: 'Action', value: s.action, rows: 2, action: Action.AnimAction, placeholder: 'walking · attacking · idle sway (keep it short)' },
     {
+      type: WidgetType.Select,
+      label: 'Input',
+      value: s.inputSource,
+      action: Action.InputSource,
+      options: [
+        { label: 'Active cel', value: 'cel' },
+        { label: 'Layer group (composited)', value: 'group' },
+      ],
+    },
+    {
       type: WidgetType.HStack,
       gap: 8,
       children: [
         { type: WidgetType.Select, label: 'Frames', value: s.frameCount, action: Action.FrameCount, options: FRAME_COUNTS.map((n) => ({ label: '' + n, value: n })) },
-        { type: WidgetType.Select, label: 'Input frame', value: Math.min(s.inputFrame, Math.max(0, fc - 1)), action: Action.InputFrame, options: frameOpts },
+        isGroup
+          ? {
+              type: WidgetType.Select,
+              label: 'Layer group',
+              value: groupVal,
+              action: Action.InputGroup,
+              options: groupOpts.length ? groupOpts : [{ label: '— no groups —', value: '' }],
+            }
+          : { type: WidgetType.Select, label: 'Input frame', value: Math.min(s.inputFrame, Math.max(0, fc - 1)), action: Action.InputFrame, options: frameOpts },
       ],
     },
     { type: WidgetType.Select, label: 'Last frame (optional — for seamless loops)', value: s.lastFrame, action: Action.LastFrame, options: lastOpts },
