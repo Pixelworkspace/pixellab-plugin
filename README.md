@@ -43,6 +43,9 @@ src/
     settings.ts        Settings tab + balance
 scripts/validate.mjs   the manifest validator
 types/pixelworkspace.d.ts   px type definitions (dev-only autocomplete)
+tsconfig.json               strict TS, ambient px types
+docs/README.md              docs landing page (rendered on GitHub)
+docs/API.md                 the full px API reference
 ```
 
 ## Manifest ↔ code (the two tracks)

@@ -105,6 +105,25 @@ interface MaskCell {
   y: number;
 }
 
+/** A layer inside a group (see LayerGroupInfo). */
+interface LayerInfo {
+  id: string;
+  name: string;
+  visible: boolean;
+  opacity: number;
+  blendMode: 'normal' | 'multiply' | 'screen';
+}
+
+/** A layer group with its child layers, as returned by px.editor.groups(). */
+interface LayerGroupInfo {
+  id: string;
+  name: string;
+  visible: boolean;
+  collapsed: boolean;
+  /** Child layers, bottom→top. */
+  layers: LayerInfo[];
+}
+
 /** Widget kinds understood by the panel renderer. */
 type WidgetKind =
   | 'vstack'
@@ -206,6 +225,33 @@ interface EditorApi {
   addFrame(): void;
   layerCount(): number;
   addLayer(): void;
+  /**
+   * The document's layer groups, each with its child layers (bottom→top). Use it
+   * to let the user pick a group as input, then read its composited pixels with
+   * groupPixels().
+   */
+  groups(): LayerGroupInfo[];
+  /**
+   * The composited "result" of one layer group as a width×height packed RGBA
+   * buffer — the group's individually-visible layers flattened, independent of
+   * the group's own visibility toggle. Defaults to the active frame. Unknown id /
+   * empty group → a fully transparent buffer.
+   */
+  groupPixels(groupId: string, frameIndex?: number): Uint32Array;
+  /** The document's layers, bottom→top (flat; see groups() for the grouped view). */
+  layers(): LayerInfo[];
+  /** Index of the active layer. */
+  activeLayer(): number;
+  setActiveLayer(index: number): void;
+  removeLayer(index: number): void;
+  renameLayer(index: number, name: string): void;
+  /** Show/hide a layer by id (e.g. to drive paperdoll variants). */
+  setLayerVisible(layerId: string, visible: boolean): void;
+  setLayerOpacity(index: number, opacity: number): void;
+  setLayerLocked(index: number, locked: boolean): void;
+  /** Create a new layer group (folder). */
+  addGroup(name?: string): void;
+  setGroupVisible(groupId: string, visible: boolean): void;
   /** Persist the active document to the server. */
   save(): Promise<void>;
 }
@@ -263,6 +309,124 @@ interface UiApi {
   progress(fraction: number | null, label?: string): void;
 }
 
+/** Visual kind of a bone (affects how the rig gizmo draws it). */
+type BoneType = 'limb' | 'line' | 'circle';
+
+/** A rig bone: a joint (x,y) + absolute angle & length, in a parent/child tree. */
+interface Bone {
+  id: string;
+  name: string;
+  parentId: string | null;
+  x: number;
+  y: number;
+  angle: number;
+  length: number;
+  /** Bound layer id (the slot this bone controls), or null. */
+  layerId: string | null;
+  type?: BoneType;
+  size?: number;
+  /** Paperdoll slot label, if this bone marks a slot. */
+  slot?: string;
+}
+
+/** Read/write the rig-lite skeleton (pixel-native bones — a posing aid + slot source). */
+interface RigApi {
+  /** All bones in the active document (a snapshot copy). */
+  bones(): Bone[];
+  /** Add a root bone (or a child when parentId is given) at the canvas centre / parent tip. */
+  addBone(name?: string | null, parentId?: string | null): void;
+  /** Patch a bone's fields (position, angle, length, name, type, size, layerId, slot). */
+  updateBone(id: string, patch: Partial<Bone>): void;
+  removeBone(id: string): void;
+  /** Set (or clear, with '') the bone's paperdoll slot label. */
+  setSlot(id: string, slot: string): void;
+  /** Select a bone in the rig panel (null clears). */
+  select(id: string | null): void;
+}
+
+interface PaperdollVariant {
+  id: string;
+  name: string;
+  /** The document layer that IS this variant. */
+  layerId: string;
+}
+interface PaperdollSlot {
+  id: string;
+  name: string;
+  boneId?: string | null;
+  variants: PaperdollVariant[];
+  activeVariantId: string | null;
+}
+
+/** Read/switch paperdoll slots (composable equipment/body parts). */
+interface PaperdollApi {
+  slots(): PaperdollSlot[];
+  /** Show a slot's variant (hiding its siblings), or hide the slot with null. Persists. */
+  setActiveVariant(slotId: string, variantId: string | null): Promise<void>;
+}
+
+/** Metadata of a reusable asset mask (see px.masks). */
+interface MaskMeta {
+  id: string;
+  name: string;
+  w: number;
+  h: number;
+}
+
+/** Reusable selection masks stored on the asset. */
+interface MasksApi {
+  list(): MaskMeta[];
+  /** The mask's pixels as a 0/1 byte per pixel (row-major, w×h), or null if unknown. */
+  get(id: string): Uint8Array | null;
+  /** Load a saved mask into the current selection. */
+  apply(id: string): void;
+  /** Save the current selection as a new mask; resolves to its id. Persists. */
+  create(name: string): Promise<string>;
+  remove(id: string): Promise<void>;
+}
+
+/** A draggable control point of a plugin gizmo. */
+interface CanvasHandleSpec {
+  id: string;
+  x: number;
+  y: number;
+  kind?: 'joint' | 'tip' | 'point' | 'pivot';
+}
+/** A line segment of a plugin gizmo (document-space). */
+interface CanvasSegmentSpec {
+  from: { x: number; y: number };
+  to: { x: number; y: number };
+  width?: number;
+  dashed?: boolean;
+  color?: string;
+}
+/** A filled circle of a plugin gizmo (document-space). */
+interface CanvasDiscSpec {
+  x: number;
+  y: number;
+  r: number;
+}
+/** A plugin-drawn interactive overlay element (bones, guides, custom handles). */
+interface CanvasElementSpec {
+  id: string;
+  color?: string;
+  handles: CanvasHandleSpec[];
+  segments?: CanvasSegmentSpec[];
+  discs?: CanvasDiscSpec[];
+}
+
+/**
+ * Draw interactive gizmos over the pixel canvas. Push a fresh element list with
+ * set(); dragging a handle (with the Move tool active) calls your onDrag handler
+ * with the new document-space position — update your model and set() again.
+ */
+interface CanvasApi {
+  set(elements: CanvasElementSpec[]): void;
+  clear(): void;
+  /** handleId is null when the element body (not a specific handle) is dragged. */
+  onDrag(handler: (elementId: string, handleId: string | null, x: number, y: number) => void): void;
+}
+
 /**
  * The one global your plugin gets. Register commands/menus/panels/tools/events,
  * and reach the editor, network, files and assets through the sub-APIs.
@@ -297,6 +461,14 @@ interface Px {
   files: FilesApi;
   assets: AssetsApi;
   ui: UiApi;
+  /** Rig-lite bones (pose aid + slot source). */
+  rig: RigApi;
+  /** Paperdoll slots × variants. */
+  paperdoll: PaperdollApi;
+  /** Reusable asset selection masks. */
+  masks: MasksApi;
+  /** Interactive canvas gizmos. */
+  canvas: CanvasApi;
 }
 
 /** The global plugin API. */

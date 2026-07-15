@@ -93,7 +93,102 @@ which is one undo step.
 | `setMask(cells)` / `clearMask()`         | —              | Non-destructive highlight (inpaint mask).|
 | `frameCount()` / `setFrame(i)` / `addFrame()` | —         | Timeline.                                |
 | `layerCount()` / `addLayer()`            | —              | Layers.                                  |
+| `layers()`                               | `LayerInfo[]`  | Flat layer list, bottom→top (`{id,name,visible,opacity,blendMode}`). |
+| `activeLayer()` / `setActiveLayer(i)`    | `number` / —   | Active layer index.                      |
+| `removeLayer(i)` / `renameLayer(i,name)` | —              | Layer structure.                         |
+| `setLayerVisible(layerId, visible)`      | —              | Show/hide a layer **by id** (drives paperdoll variants). |
+| `setLayerOpacity(i, o)` / `setLayerLocked(i, b)` | —      | Layer props.                             |
+| `addGroup(name?)` / `setGroupVisible(id, b)` | —          | Group folders.                           |
+| `groups()`                               | `LayerGroupInfo[]` | Layer groups, each with its child `layers` (bottom→top). |
+| `groupPixels(groupId, frameIndex?)`      | `Uint32Array`  | Composited result of one group (its visible layers flattened), width×height. Defaults to the active frame. |
 | `save()` **async**                       | `Promise`      | Persist the document to the server.      |
+
+**Taking a layer group as input.** Let the user pick a group, then flatten it to
+one raster and send that to your API:
+
+```js
+const groups = px.editor.groups();            // [{ id, name, visible, layers:[…] }]
+const g = groups[0];
+const pixels = px.editor.groupPixels(g.id);   // Uint32Array, width×height
+const dataUrl = await px.image.encode(pixels, px.editor.width(), px.editor.height());
+// dataUrl → your request body (e.g. an animate/first_frame image)
+```
+
+`groupPixels()` renders the group's individually-visible layers regardless of the
+group's own visibility toggle, so an explicitly-picked hidden group still yields
+its pixels. Unknown id / empty group → a fully transparent buffer.
+
+---
+
+## `px.rig` — bones (pose aid + slots)
+
+Read/mutate the rig-lite skeleton. Bones are a pixel-native posing aid and the
+source of paperdoll slots — not a runtime skeleton.
+
+| Method                              | Returns  | Notes                                              |
+| ----------------------------------- | -------- | -------------------------------------------------- |
+| `bones()`                           | `Bone[]` | Snapshot of the active document's bones.           |
+| `addBone(name?, parentId?)`         | —        | Root bone, or a child of `parentId` (at its tip).  |
+| `updateBone(id, patch)`             | —        | Patch `{x,y,angle,length,name,type,size,layerId,slot}`. |
+| `removeBone(id)`                    | —        | Children re-parent to the removed bone's parent.   |
+| `setSlot(id, slot)`                 | —        | Set/clear (`''`) the bone's paperdoll slot label.  |
+| `select(id)`                        | —        | Select a bone (null clears).                       |
+
+```js
+const [torso] = px.rig.bones();
+px.rig.updateBone(torso.id, { angle: torso.angle + 0.1 }); // nudge the pose
+```
+
+---
+
+## `px.paperdoll` — slots × variants
+
+Slots are named positions (optionally anchored to a bone); variants are looks
+backed by a layer. Switching a variant toggles layer visibility.
+
+| Method                                    | Returns          | Notes                             |
+| ----------------------------------------- | ---------------- | --------------------------------- |
+| `slots()`                                 | `PaperdollSlot[]`| `{id,name,boneId?,variants,activeVariantId}`. |
+| `setActiveVariant(slotId, variantId)` **async** | `Promise`  | Show a variant (null hides the slot). Persists to the asset. |
+
+---
+
+## `px.masks` — reusable selection masks
+
+Masks are stored on the asset, so one mask applies across every frame/animation.
+
+| Method                          | Returns              | Notes                                   |
+| ------------------------------- | -------------------- | --------------------------------------- |
+| `list()`                        | `MaskMeta[]`         | `{id,name,w,h}`.                        |
+| `get(id)`                       | `Uint8Array \| null` | One 0/1 byte per pixel (row-major).     |
+| `apply(id)`                     | —                    | Load a mask into the current selection. |
+| `create(name)` **async**        | `Promise<string>`    | Save the current selection; resolves to the new id. |
+| `remove(id)` **async**          | `Promise`            | Delete a mask.                          |
+
+---
+
+## `px.canvas` — interactive gizmos
+
+Draw overlay elements (handles + segments + discs) on the pixel canvas and get
+drag callbacks. Dragging works while the **Move** tool is active.
+
+| Method                  | Notes                                                                 |
+| ----------------------- | --------------------------------------------------------------------- |
+| `set(elements)`         | Replace the plugin's gizmo list (`CanvasElementSpec[]`).              |
+| `clear()`               | Remove them.                                                          |
+| `onDrag(handler)`       | `(elementId, handleId \| null, x, y)` — handleId null = body drag.   |
+
+```js
+let p = { x: 8, y: 8 };
+const draw = () => px.canvas.set([
+  { id: 'dot', handles: [{ id: 'c', x: p.x, y: p.y, kind: 'point' }] },
+]);
+px.canvas.onDrag((elId, handleId, x, y) => { p = { x, y }; draw(); });
+draw();
+```
+
+Your `set()` is declarative: on each drag, update your own model and call `set()`
+again. Elements persist until `clear()` or the plugin unloads.
 
 ---
 
