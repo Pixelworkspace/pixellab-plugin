@@ -6,10 +6,16 @@
 //   2. Two-track consistency — every id declared in `contributes` is registered
 //      in the code, and every px.register* call in the code is declared. The
 //      manifest and the code must agree (that's the whole point of declaring).
+//   3. Repo identity — the checkout is the repository `package.json` says it is.
+//      A plugin started as a FORK of the template can be pull-requested straight
+//      back into it (GitHub pre-fills the upstream as the PR target), which
+//      silently turns the template into a copy of the plugin. That happened
+//      once; this check makes it fail loudly instead.
 //
 // Exits non-zero on any error. Run: `node scripts/validate.mjs`.
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
@@ -139,6 +145,54 @@ if (manifest.capabilities == null) {
 } else {
   for (const c of usedCaps) if (!manifest.capabilities.includes(c)) err(`Code uses px.${c} but \`capabilities\` does not declare "${c}" — it would not exist in the sandbox.`);
   for (const c of manifest.capabilities) if (!usedCaps.has(c)) warn(`Capability "${c}" is declared but the code never touches px.${c}.`);
+}
+
+// --- repo identity ----------------------------------------------------------
+// `package.json` declares which repository this plugin belongs to; the check
+// compares it with the checkout's actual `origin`. A fork merged back into its
+// upstream brings its own package.json along, so the two stop matching and this
+// fails — which is exactly the accident it exists to catch.
+//
+// Both halves are optional: a plugin without the field, or a checkout without a
+// remote (a downloaded zip, some CI setups), only gets a warning. The check
+// should protect the repos that opt in, not block everyone else.
+const declaredRepo = (() => {
+  try {
+    return JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))?.pixelworkspace?.repo ?? null;
+  } catch {
+    return null;
+  }
+})();
+
+/** `owner/name` from any git URL form (ssh, https, with or without .git). */
+function repoSlug(url) {
+  const m = String(url).trim().match(/[/:]([^/:]+)\/([^/]+?)(?:\.git)?\s*$/);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
+if (!declaredRepo) {
+  warn('`pixelworkspace.repo` is missing from package.json — add "Owner/repo" so a fork merged back into the template is caught here.');
+} else {
+  let originUrl = null;
+  try {
+    originUrl = execFileSync('git', ['config', '--get', 'remote.origin.url'], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    /* no git, no remote — handled below */
+  }
+  const actual = originUrl ? repoSlug(originUrl) : null;
+  if (!actual) {
+    warn(`No git origin to check against — package.json claims this is ${declaredRepo}.`);
+  } else if (actual.toLowerCase() !== declaredRepo.toLowerCase()) {
+    err(
+      `This checkout is ${actual}, but package.json says the plugin belongs to ${declaredRepo}. ` +
+        'Either the wrong repository was merged in (a fork into its template does exactly this), ' +
+        'or `pixelworkspace.repo` was not updated after forking.'
+    );
+  }
 }
 
 // --- report -----------------------------------------------------------------

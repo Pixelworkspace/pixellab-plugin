@@ -1,0 +1,32 @@
+name: check
+
+# Runs on pull requests as well as pushes, and that is the point: a pull request
+# opened FROM A FORK back into this template (GitHub pre-fills the upstream as
+# the PR target, so it is one click away) fails here, because the fork carries
+# its own `pixelworkspace.repo` and the manifest of a different plugin.
+#
+# Make this a required status check on `main` — Settings → Branches → branch
+# protection — or it can be merged past.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # `npm ci` needs the lockfile to match package.json; `npm i` would quietly
+      # repair a mismatch that should be visible instead.
+      - run: npm ci
+      # typecheck → validate (structure, manifest ↔ code, repo identity) → build
+      - run: npm run check
+      # The committed bundle is what the app runs: the repo is cloned and the
+      # entry executed as-is, with no build step on the server. A stale
+      # output/entry.js therefore ships stale code.
+      - name: output/entry.js is up to date
+        run: git diff --exit-code -- output/entry.js
