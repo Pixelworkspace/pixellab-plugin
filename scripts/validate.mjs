@@ -38,6 +38,15 @@ const str = (v) => typeof v === 'string' && v.trim().length > 0;
 if (!str(manifest.name)) err('`name` is required (non-empty string).');
 if (!str(manifest.version)) err('`version` is required (non-empty string).');
 if (!str(manifest.entry)) err('`entry` is required (path to the built entry file).');
+if (manifest.api == null) warn('`api` is missing — declare `api: 1` (the plugin API version this plugin targets).');
+else if (!Number.isInteger(manifest.api) || manifest.api < 1) err('`api` must be a positive integer (the plugin API version).');
+
+// The gateable px namespaces. `px.tool` rides with `editor` (stroke primitives).
+const CAPABILITIES = ['editor', 'rig', 'paperdoll', 'masks', 'canvas', 'effects', 'files', 'assets', 'game'];
+if (manifest.capabilities != null) {
+  if (!Array.isArray(manifest.capabilities) || !manifest.capabilities.every(str)) err('`capabilities` must be an array of capability names.');
+  else for (const c of manifest.capabilities) if (!CAPABILITIES.includes(c)) err(`Unknown capability: ${c}. Valid: ${CAPABILITIES.join(', ')}.`);
+}
 if (manifest.hosts != null && !(Array.isArray(manifest.hosts) && manifest.hosts.every(str)))
   err('`hosts` must be an array of hostname strings.');
 
@@ -100,6 +109,36 @@ try {
 for (const kind of ['commands', 'panels', 'tools']) {
   for (const id of declared[kind]) if (!registered[kind].has(id)) err(`${kind}: "${id}" declared in plugin.yaml but never px.register…('${id}') in the code.`);
   for (const id of registered[kind]) if (!declared[kind].has(id)) err(`${kind}: "${id}" is registered in the code but not declared in plugin.yaml.`);
+}
+
+// --- capabilities ↔ code cross-check ----------------------------------------
+// The app installs ONLY declared namespaces — code touching an undeclared one
+// throws at runtime, so catch it here. (`px.tool` counts as `editor`.)
+const usedCaps = new Set();
+const CAP_RE = /\bpx\.(editor|tool|rig|paperdoll|masks|canvas|effects|files|assets|game)\b/g;
+function scanCaps(dir) {
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    const s = statSync(p);
+    if (s.isDirectory()) scanCaps(p);
+    else if (/\.(ts|js|mjs)$/.test(name)) {
+      const code = readFileSync(p, 'utf8');
+      let m;
+      while ((m = CAP_RE.exec(code))) usedCaps.add(m[1] === 'tool' ? 'editor' : m[1]);
+    }
+  }
+}
+try {
+  scanCaps(srcDir);
+} catch {
+  /* already warned above */
+}
+if (manifest.capabilities == null) {
+  const list = usedCaps.size ? Array.from(usedCaps).join(', ') : '';
+  warn(`\`capabilities\` is missing — declare what the plugin uses${list ? ` (detected: [${list}])` : ' (detected: none)'}. Without it the app grants everything.`);
+} else {
+  for (const c of usedCaps) if (!manifest.capabilities.includes(c)) err(`Code uses px.${c} but \`capabilities\` does not declare "${c}" — it would not exist in the sandbox.`);
+  for (const c of manifest.capabilities) if (!usedCaps.has(c)) warn(`Capability "${c}" is declared but the code never touches px.${c}.`);
 }
 
 // --- report -----------------------------------------------------------------

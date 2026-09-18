@@ -5,8 +5,24 @@
 
 name: My Plugin
 version: 0.1.0
+# The `px` plugin-API version this plugin targets. The app refuses to load a
+# plugin that needs a NEWER API than it implements (instead of failing mid-run).
+api: 1
 entry: output/entry.js
 hosts: []
+# The px namespaces this plugin uses — the app installs ONLY these. Valid:
+# editor, rig, paperdoll, masks, canvas, effects, files, assets, game.
+# (Registration, storage, ui, http-within-hosts and image are always available.)
+capabilities:
+  - editor
+# Marketplace sub-category. One of: integration, tools, import-export, workflow,
+# ui, ai, other (for kind `plugin`). Optional — omit to list as uncategorised.
+category: tools
+# Free-form search tags, up to 8. Lowercased and de-duplicated on publish.
+# They drive search; `category` drives navigation.
+tags:
+  - starter
+  - template
 description: A starter pixelworkspace plugin — panel, command and menu, built on the generic px.* API.
 
 contributes:

@@ -192,9 +192,71 @@ interface Widget {
   [key: string]: any;
 }
 
+/** A value a tool setting can hold. */
+type ToolOptionValue = string | number | boolean;
+
+/**
+ * Shows a setting only while another one is in a given state. Plain data, not a
+ * function — the declaration crosses into the host, and a callback would not.
+ * Use exactly one of the three tests.
+ */
+interface ToolOptionCondition {
+  option: string;
+  equals?: ToolOptionValue;
+  notEquals?: ToolOptionValue;
+  /** For numeric settings, e.g. show a brush shape only from size 1 upwards. */
+  atLeast?: number;
+}
+
+/** One control in the options bar above the canvas. */
+type ToolOption =
+  | { kind: 'toggle'; id: string; label: string; visibleWhen?: ToolOptionCondition }
+  | {
+      kind: 'slider';
+      id: string;
+      label: string;
+      min: number;
+      max: number;
+      step?: number;
+      /** Appended to the readout, e.g. 'px' or '%'. */
+      unit?: string;
+      /** Ctrl+wheel adjusts this one. At most one per tool. */
+      wheelAdjustable?: boolean;
+      visibleWhen?: ToolOptionCondition;
+    }
+  | {
+      kind: 'choice';
+      id: string;
+      label: string;
+      choices: Array<{ value: string; label: string }>;
+      visibleWhen?: ToolOptionCondition;
+    };
+
 interface ToolOptions {
-  /** A single character / emoji shown as the tool icon. */
+  /** SVG path data for a 24×24 icon, or a single character / emoji. */
   icon?: string;
+  /** Single-letter keyboard shortcut. */
+  shortcut?: string;
+  /**
+   * Toolbar position; lower comes first. Built-ins occupy 10–110 and a plugin
+   * tool is held behind them — unless it joins a group, where its position counts.
+   */
+  order?: number;
+  /**
+   * Share a toolbar button with other tools, opened by a flyout. Use 'shapes' to
+   * sit beside line/rectangle/ellipse, or any new name for your own group.
+   */
+  group?: string;
+  /** Label for the group's button. Set it on any one member. */
+  groupName?: string;
+  /** True if the tool paints with the editor's current colour (shown in the bar). */
+  usesColor?: boolean;
+  /**
+   * Settings rendered into the options bar. The host keeps the values and calls
+   * `onOptionChange` — read them there, the declaration itself stays data.
+   */
+  options?: ToolOption[];
+  onOptionChange?(optionId: string, value: ToolOptionValue): void;
   onPointerDown?(x: number, y: number, button: number): void;
   onPointerMove?(x: number, y: number, button: number): void;
   onPointerUp?(x: number, y: number, button: number): void;
@@ -304,9 +366,43 @@ interface AssetsApi {
   open(assetId: string): void;
 }
 
+/** A Game Studio scene, as a plugin sees it. */
+interface GameScene {
+  id: string;
+  name: string;
+  genre: 'topdown' | 'sidescroller' | 'isometric';
+}
+
+/**
+ * The Game Studio, from the editor side.
+ *
+ * Note what is NOT here: a way to run an entity yourself. Entity behaviour
+ * executes in the GAME sandbox, where `gs` lives, so a plugin contributes
+ * behaviour SOURCE with registerBehaviours() rather than callbacks. Reaching
+ * back into the plugin per entity per frame would cost a second sandbox
+ * crossing on every step.
+ */
+interface GameApi {
+  /** Scenes of the project the open asset belongs to. */
+  scenes(): Promise<GameScene[]>;
+  /** Open a scene in the studio. */
+  open(sceneId: string): void;
+  /** Open a scene in its own play tab. */
+  play(sceneId: string): void;
+  /**
+   * Contribute `gs.behaviour(...)` source, available to every scene. Called
+   * again with new source replaces this plugin's previous contribution.
+   */
+  registerBehaviours(source: string): void;
+}
+
 interface UiApi {
   /** Show a progress bar on the plugin panel. `null` = indeterminate. */
   progress(fraction: number | null, label?: string): void;
+  /** Show a transient toast, attributed to your plugin. */
+  toast(message: string, kind?: 'info' | 'success' | 'error'): void;
+  /** Themed confirm dialog (titled with your plugin's name). Ask before anything destructive. */
+  confirm(message: string): Promise<boolean>;
 }
 
 /** Visual kind of a bone (affects how the rig gizmo draws it). */
@@ -427,6 +523,34 @@ interface CanvasApi {
   onDrag(handler: (elementId: string, handleId: string | null, x: number, y: number) => void): void;
 }
 
+/** A declared input of a custom effect — drives the auto-generated UI (a slider/color/toggle). */
+interface EffectInput {
+  key: string;
+  label?: string;
+  type: 'range' | 'color' | 'bool';
+  min?: number;
+  max?: number;
+  step?: number;
+  /** Initial value (a packed Color for 'color'). */
+  default?: number | boolean;
+}
+
+interface EffectDef {
+  name: string;
+  inputs?: EffectInput[];
+  /**
+   * Per-frame render — transform the layer's packed pixels at loop-phase `t` (0..1) into
+   * a NEW Uint32Array. `inputs` holds the current param values (keyed by EffectInput.key;
+   * 'color' inputs are packed Colors). Runs once per frame during compositing.
+   */
+  render(pixels: Uint32Array, width: number, height: number, inputs: Record<string, number | boolean>, t: number): Uint32Array;
+}
+
+/** Register custom effects/shaders. ONE plugin may register many (no plugin-per-shader). */
+interface EffectsApi {
+  register(id: string, def: EffectDef): void;
+}
+
 /**
  * The one global your plugin gets. Register commands/menus/panels/tools/events,
  * and reach the editor, network, files and assets through the sub-APIs.
@@ -442,7 +566,12 @@ interface Px {
   onPanelEvent(panelId: string, handler: (action: string, value: any) => void | Promise<void>): void;
   /** Register a tool that receives raw pointer events (use px.tool.* inside). */
   registerTool(id: string, title: string, options: ToolOptions): void;
-  /** Subscribe to an editor event, e.g. 'documentChange'. */
+  /**
+   * Subscribe to an editor event. Each fires only when its payload changed:
+   * 'documentChange' { width, height } · 'frameChange' { frame, frameCount } ·
+   * 'selectionChange' Selection|null · 'layerChange' { layer, layerCount } ·
+   * 'toolChange' { tool }. Handlers run synchronously with a short budget.
+   */
   on(event: string, handler: (payload: any) => void): void;
   /** Print to the plugin log. */
   log(message: string): void;
@@ -460,6 +589,8 @@ interface Px {
   image: ImageApi;
   files: FilesApi;
   assets: AssetsApi;
+  /** The Game Studio: scenes, and behaviours contributed to them. */
+  game: GameApi;
   ui: UiApi;
   /** Rig-lite bones (pose aid + slot source). */
   rig: RigApi;
@@ -469,6 +600,8 @@ interface Px {
   masks: MasksApi;
   /** Interactive canvas gizmos. */
   canvas: CanvasApi;
+  /** Register custom effects/shaders (with declared inputs). */
+  effects: EffectsApi;
 }
 
 /** The global plugin API. */
