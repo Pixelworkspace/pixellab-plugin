@@ -5,9 +5,21 @@
 
 name: Pixellab AI
 version: 0.2.0
+api: 1
 entry: output/entry.js
 hosts:
   - api.pixellab.ai
+capabilities:
+  - editor
+  - files
+  - assets
+# It talks to an external service, so: integration.
+category: integration
+tags:
+  - ai
+  - generate
+  - animation
+  - pixellab
 description: >-
   Generate, animate and repaint sprites with the Pixellab AI API — own panel
   with job tracking, progress, cost details, and metadata-tagged file storage.

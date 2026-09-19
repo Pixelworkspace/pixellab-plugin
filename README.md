@@ -17,10 +17,18 @@ npm run build       # esbuild src/main.ts → output/entry.js  (commit the resul
 npm run check       # all three
 ```
 
+Your editor gets full autocomplete for `px` from `types/pixelworkspace.d.ts`
+(wired via `tsconfig.json`).
+
 ## Layout
 
 ```
-plugin.yaml            manifest — name/version/entry/hosts + `contributes`
+plugin.yaml            manifest — name/version/api/entry/hosts/capabilities
+                       + `contributes`. `api: 1` = the px API version this
+                       plugin targets (the app refuses plugins needing a
+                       newer one); `capabilities` lists the px namespaces
+                       the code uses — the app installs ONLY those
+                       (`npm run validate` cross-checks against the source)
 output/entry.js        built bundle (what the app runs) — committed
 src/
   config.ts            constants (endpoints base, sizes, costs, tabs)

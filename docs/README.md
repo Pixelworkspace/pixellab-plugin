@@ -7,8 +7,8 @@ this page when you open the `docs/` folder.)
 
 - **[API.md](API.md)** — the full `px` API reference: commands, menus, panels,
   tools, events, and every sub-API (`px.editor`, `px.http`, `px.storage`,
-  `px.image`, `px.files`, `px.assets`, `px.ui`) with its methods and the widget
-  catalog.
+  `px.image`, `px.files`, `px.assets`, `px.game`, `px.ui`) with its methods and
+  the widget catalog.
 
 ## Quick orientation
 
@@ -20,6 +20,28 @@ object — no DOM, no `window`, no `fetch`. You declare contributions in
 The type stubs in **[`types/pixelworkspace.d.ts`](../types/pixelworkspace.d.ts)**
 give your editor autocomplete for the whole `px` surface and mirror this
 reference — treat them as the machine-readable companion to `API.md`.
+
+## Contributing to the Game Studio
+
+`px.game` reaches the studio's scenes: list them, open one, or contribute
+behaviours that any scene can place on its map.
+
+Behaviours are contributed as **source**, not as callbacks — entity code runs
+in the game's own sandbox (where the global is `gs`, not `px`), and calling
+back into the plugin once per entity per frame would double the cost of every
+step. See the [game API reference](https://pixelwork.space/docs/game-api) for
+what `gs` offers.
+
+```js
+px.game.registerBehaviours(`
+  gs.behaviour('homing', {
+    label: 'Homing',
+    params: [{ kind: 'number', id: 'speed', label: 'Speed', default: 50 }],
+    update(self) { gs.towardsPlayer(gs.param('speed', 50)); },
+    touch() { gs.damage(1); },
+  });
+`);
+```
 
 ## Working with layers & layer groups
 
